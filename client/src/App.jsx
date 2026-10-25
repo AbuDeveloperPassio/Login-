@@ -34,7 +34,9 @@ export default function App() {
     localStorage.setItem(TOKEN_KEY, token)
     setToken(token)
     setUser(user)
-    setView('dashboard')
+    // Only an admin logging in goes straight to the admin page.
+    // Sign up (and regular users) always land on the dashboard.
+    setView(mode === 'login' && user.role === 'admin' ? 'admin' : 'dashboard')
   }
 
   function handleLogout() {
