@@ -43,7 +43,8 @@ export default function Auth({ mode, onSwitch, onAuth }) {
       const data = isSignup
         ? await signup(form)
         : await login({ email: form.email, password: form.password })
-      onAuth(data)
+      // Tell the app where this came from: only "login" may open the admin page
+      onAuth(data, isSignup ? 'signup' : 'login')
     } catch (err) {
       setError(err.message)
     } finally {

@@ -13,7 +13,7 @@ export default function App() {
   const [view, setView] = useState('dashboard')
   const [checking, setChecking] = useState(true)
 
-  // Restore the session if a token is saved
+  // Restore the session if a token is saved (always opens the dashboard)
   useEffect(() => {
     const saved = localStorage.getItem(TOKEN_KEY)
     if (!saved) {
@@ -30,13 +30,14 @@ export default function App() {
       .finally(() => setChecking(false))
   }, [])
 
-  function handleAuth({ token, user }) {
+  // source is "login" or "signup", sent by the Auth page
+  function handleAuth({ token, user }, source) {
     localStorage.setItem(TOKEN_KEY, token)
     setToken(token)
     setUser(user)
-    // Only an admin logging in goes straight to the admin page.
-    // Sign up (and regular users) always land on the dashboard.
-    setView(mode === 'login' && user.role === 'admin' ? 'admin' : 'dashboard')
+    // Only an admin who just LOGGED IN goes straight to the admin page.
+    // Signing up never does.
+    setView(source === 'login' && user.role === 'admin' ? 'admin' : 'dashboard')
   }
 
   function handleLogout() {
