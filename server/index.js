@@ -15,11 +15,32 @@ app.use(cors())
 app.use(express.json())
 
 // In-memory user store (resets when the server restarts)
-const users = new Map() // email -> { id, name, email, passwordHash }
+const users = new Map() // email -> { id, name, email, passwordHash, role, createdAt }
 let nextId = 1
 
+// Seed an admin account from environment variables (re-created on every start)
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase()
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '')
+
+if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+  users.set(ADMIN_EMAIL, {
+    id: nextId++,
+    name: 'Admin',
+    email: ADMIN_EMAIL,
+    passwordHash: bcrypt.hashSync(ADMIN_PASSWORD, 10),
+    role: 'admin',
+    createdAt: new Date().toISOString(),
+  })
+}
+
 function publicUser(user) {
-  return { id: user.id, name: user.name, email: user.email }
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+  }
 }
 
 function signToken(user) {
@@ -41,7 +62,7 @@ app.use('/api', (req, res, next) => {
   next()
 })
 
-// Sign up
+// Sign up (always creates a regular user)
 app.post('/api/auth/signup', async (req, res) => {
   const name = String(req.body.name || '').trim()
   const email = String(req.body.email || '').trim().toLowerCase()
@@ -63,7 +84,14 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10)
-  const user = { id: nextId++, name, email, passwordHash }
+  const user = {
+    id: nextId++,
+    name,
+    email,
+    passwordHash,
+    role: 'user',
+    createdAt: new Date().toISOString(),
+  }
   users.set(email, user)
 
   res.status(201).json({ token: signToken(user), user: publicUser(user) })
@@ -84,7 +112,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ token: signToken(user), user: publicUser(user) })
 })
 
-// Auth middleware
+// Auth middleware: verifies the token and loads the current user
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : null
@@ -93,21 +121,88 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ message: 'Not authenticated' })
   }
 
+  let payload
   try {
-    req.auth = jwt.verify(token, JWT_SECRET)
-    next()
+    payload = jwt.verify(token, JWT_SECRET)
   } catch {
-    res.status(401).json({ message: 'Session expired, please log in again' })
+    return res
+      .status(401)
+      .json({ message: 'Session expired, please log in again' })
   }
+
+  const user = users.get(payload.email)
+  if (!user) {
+    return res
+      .status(401)
+      .json({ message: 'User not found, please log in again' })
+  }
+
+  req.user = user
+  next()
+}
+
+// Admin middleware: must run after requireAuth
+function requireAdmin(req, res, next) {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' })
+  }
+  next()
+}
+
+function findById(id) {
+  for (const user of users.values()) {
+    if (user.id === id) return user
+  }
+  return null
 }
 
 // Current user
 app.get('/api/auth/me', requireAuth, (req, res) => {
-  const user = users.get(req.auth.email)
-  if (!user) {
-    return res.status(401).json({ message: 'User not found, please log in again' })
+  res.json({ user: publicUser(req.user) })
+})
+
+// Admin: list all users
+app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
+  res.json({ users: Array.from(users.values()).map(publicUser) })
+})
+
+// Admin: change a user's role
+app.patch(
+  '/api/admin/users/:id/role',
+  requireAuth,
+  requireAdmin,
+  (req, res) => {
+    const target = findById(Number(req.params.id))
+    const role = String(req.body.role || '')
+
+    if (!target) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+    if (role !== 'admin' && role !== 'user') {
+      return res.status(400).json({ message: 'Role must be admin or user' })
+    }
+    if (target.id === req.user.id) {
+      return res.status(400).json({ message: 'You cannot change your own role' })
+    }
+
+    target.role = role
+    res.json({ user: publicUser(target) })
   }
-  res.json({ user: publicUser(user) })
+)
+
+// Admin: delete a user
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
+  const target = findById(Number(req.params.id))
+
+  if (!target) {
+    return res.status(404).json({ message: 'User not found' })
+  }
+  if (target.id === req.user.id) {
+    return res.status(400).json({ message: 'You cannot delete your own account' })
+  }
+
+  users.delete(target.email)
+  res.json({ message: 'User deleted' })
 })
 
 // Unknown routes

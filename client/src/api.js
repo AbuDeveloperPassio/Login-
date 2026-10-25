@@ -23,3 +23,10 @@ async function request(path, { method = 'GET', body, token } = {}) {
 export const signup = (body) => request('/api/auth/signup', { method: 'POST', body })
 export const login = (body) => request('/api/auth/login', { method: 'POST', body })
 export const getMe = (token) => request('/api/auth/me', { token })
+
+// Admin
+export const getUsers = (token) => request('/api/admin/users', { token })
+export const setUserRole = (token, id, role) =>
+  request(`/api/admin/users/${id}/role`, { method: 'PATCH', body: { role }, token })
+export const deleteUser = (token, id) =>
+  request(`/api/admin/users/${id}`, { method: 'DELETE', token })
